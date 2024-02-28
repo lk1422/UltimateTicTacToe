@@ -41,12 +41,13 @@ class UltimateTicTacToe():
         if self.game_over:
             return self.get_state(), self.winner, self.game_over
         #Generate Adverserial move
-        adv_state = self.get_state(adverse=True)
+        adv_state = self.get_state()
         actions = self.get_legal_actions().to(torch.long)
-        a = q_func.generate_action(adv_state, actions)
+        a = q_func.generate_action(adv_state, actions, adv=True)
         sub_board, sub_x, sub_y = UltimateTicTacToe._action_to_coord(a)
         self.place_mark(sub_board, sub_x, sub_y)
-        return self.get_state(), self.winner, self.game_over
+        reward = -1 if self.winner == 0 else 2*self.winner
+        return self.get_state(), reward , self.game_over
 
     
     def _action_to_coord(action: int):
@@ -66,10 +67,6 @@ class UltimateTicTacToe():
         sub_y = (action - sub_board*9)//3
         sub_x = (action - sub_board*9)%3
         return sub_board, sub_x, sub_y
-
-
-
-
 
 
     def get_legal_actions(self):

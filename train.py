@@ -1,48 +1,52 @@
-import gym
-import numpy as np
 import torch
+import time
+import random
+from ultimate import UltimateTicTacToe
 from DQN import DQN
 
-def main():
-    env = gym.make("CartPole-v1", render_mode="human")
-    env.action_space.seed(42)
-    d = DQN(4, 2, 128, .99)
+device = torch.device('cuda')
 
-    EPOCHS = 1000
-    EPS: float = .3
-    UPDATE_TIME = 20
-
-
-    time = 0
-    for epoch in range(EPOCHS):
-        total_reward = 0
-        state = env.reset()
-        state = torch.Tensor(state[0])
-        while (True):
-            if np.random.rand() < EPS:
-                action = np.random.randint(2)
+def train(model, env, epochs, eps, update_time):
+    for e in range(epochs):
+        env.reset()
+        state = env.get_state()
+        while(not env.game_over):
+            actions = env.get_legal_actions()
+            if random.random() < eps:
+                action = int(random.choice(actions).item())
             else:
-                action = d.GenernateAction(state)
+                action = model.generate_action(state, actions)
+            #env.print_board()
+            next_state, reward, terminal = env.step(model, action)
+            model.Learn(state, action, next_state, reward, terminal)
+        print("Eval:", model.Net(env.get_state().to(device)))
+        print("GAME COMPLETE, winner:", env.winner)
+        print("Resolutions:", env.resolutions)
+        print("Epoch:", e, "Complete")
+        env.print_board()
+        if e%update_time == 0:
+            model.updateWeights()
+            eps *= 0.999
+            eps = min(eps, 0.35)
+        if e%1000 == 0:
+            torch.save(model.Net.state_dict(), "model2.pth")
+    return model
 
-            next_state, reward, done, _, _ = env.step(action)
-            next_state = torch.Tensor(next_state)
-            total_reward += reward
 
-            d.Learn(state, action, next_state, int(reward), done)
-            state = next_state
+def main():
+    env = UltimateTicTacToe()
+    d = DQN(91, 81, 128, 0.99, device)
+    #d.Net.load_state_dict(torch.load("model.pth"))
+    #d.Target.load_state_dict(torch.load("model.pth"))
+    #env.debug_play_agent(d)
 
-            EPS *= .95
-            EPS = min(EPS, .1)
+    EPOCHS = 200000
+    EPS = 0.5
+    UPDATE_TIME = 25
+    d = train(d, env, EPOCHS, EPS, UPDATE_TIME)
+    torch.save(d.Net.state_dict(), "model.pth")
 
-            time += 1
-            if(time % UPDATE_TIME == 0):
-                d.updateWeights()
 
-            if done:
-                print(f"{epoch} Epoch total reward {total_reward}")
-                break
-
-    env.close()
 
 if __name__ == "__main__":
     main()

@@ -26,7 +26,7 @@ class DQN():
         """
 
         #Initialize Loss & Optim
-        self.optim = torch.optim.Adam(self.Net.parameters(), lr=3e-6)
+        self.optim = torch.optim.Adam(self.Net.parameters(), lr=3e-5)
         self.loss  = torch.nn.MSELoss()
 
         #Set up memory buff and step_count
@@ -49,63 +49,49 @@ class DQN():
 
         #Move New Tensors to device
 
-        batch:List[Tuple] = self.mem.getBatch()
-
-        #add new tensors to batch
-        batch.append( (state, action, state2, reward, terminal) )
-
+        S, A, S_, R, T = self.mem._getBatch()
+        S = S.to(self.device)
+        A = A.to(self.device)
+        S_ = S_.to(self.device)
+        R = R.to(self.device)
+        T = T.to(self.device)
+        self.mem.addMemory(state, action, state2, reward, terminal)
+        if(S.shape[0] == 0): return
+        #(State, Action, S_, R, T)
         #Set up models
         self.Net.train()
         self.Target.eval()
-
-        total_loss = 0
-        for b in batch:
-            #Calculate Q(s,a), max Q(s', a')
-            s  = b[0].to(self.device)
-            s1 = b[2].to(self.device)
-            net_out = self.Net(s)
-            targ_out = self.Target(s1)
-
-            #get target action and target val
-            target_val, _    = torch.max(targ_out, dim=0)
-            target_val = torch.zeros((1,1)).to(self.device) \
-                         if b[4] else target_val
-            target_val    = b[3] + self.gamma * target_val
-            
-            #Get model output
-            one_hot = torch.zeros((self.n_actions, 1)).to(self.device)
-            one_hot[b[1] , 0] = 1
-            out = torch.matmul(net_out, one_hot).unsqueeze(0)
-
-            #Calculate Loss
-            self.optim.zero_grad()
-            target_val = target_val.reshape(1)
-            out = out.reshape(1)
-            l = self.loss(out, target_val)
-            l.backward()
-            total_loss+= l.item()
-            #print(l.item())
-
-            #Optimize
-            self.optim.step()
+        non_terminal_mask = torch.abs(1-T)
+        current_state_val = self.Net(S)
+        next_state_val, _ = torch.max(self.Target(S_), dim=1)
+        target_val = R + self.gamma*next_state_val*non_terminal_mask
+        current_state_val = current_state_val[:, A][0]
+        self.optim.zero_grad()
+        l = self.loss(current_state_val , target_val)
+        l.backward()
+        self.optim.step()
 
         #Add new event to memories
         self.mem.addMemory(state, action, state2, reward, terminal)
-        #print("BATCH LOSS:", total_loss/len(batch))
+        #print("BATCH LOSS:", total_loss/S.shape[0])
 
     def updateWeights(self):
             self.Target.load_state_dict(self.Net.state_dict())
 
 
-    def generate_action(self, state:torch.Tensor, legal_actions : torch.Tensor) -> int:
-        mask = torch.zeros(self.n_actions)
+    def generate_action(self, state:torch.Tensor, legal_actions : torch.Tensor, adv=False) -> int:
+        mask = torch.zeros(self.n_actions).to(self.device)
         legal_actions = legal_actions.to(torch.long)
         mask[legal_actions] = 1
-        #self.Net.eval()
         state = state.to(self.device)
-        vals = self.Target(state)
+        self.Net.eval()
+        vals = self.Net(state)
+        self.Net.eval()
         negated_mask = torch.abs(1-mask)
-        vals = negated_mask*(vals*0 - 100) + mask*vals
-        a = int(torch.argmax(vals, dim=0).item())
-        return a
+        if not adv:
+            vals = negated_mask*(vals*0 - float('inf')) + mask*vals
+            return int(torch.argmax(vals, dim=0).item())
+        else:
+            vals = negated_mask*(vals*0 + float('inf')) + mask*vals
+            return int(torch.argmin(vals, dim=0).item())
         
