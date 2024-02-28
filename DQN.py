@@ -6,14 +6,27 @@ from memory import MemoryBuffer
 
 class DQN():
     
-    def __init__(self, state_size: int, n_actions:int, batch_size: int , discount:float):
+    def __init__(self, state_size: int, n_actions:int, batch_size: int , discount:float, device=None):
 
         #Initialize models
-        self.Net = nn.Sequential(*[nn.Linear(state_size, state_size), nn.ReLU(), nn.Linear(state_size, n_actions)])
-        self.Target = nn.Sequential(*[nn.Linear(state_size, state_size), nn.ReLU(), nn.Linear(state_size, n_actions)])
+        self.Net = nn.Sequential(*[nn.Linear(state_size, state_size*2), nn.ReLU(), \
+            nn.Linear(state_size*2, state_size*2), nn.ReLU(), \
+            nn.Linear(state_size*2, state_size*2), nn.ReLU(), \
+            nn.Linear(state_size*2, n_actions) ])
+
+        self.Target = nn.Sequential(*[nn.Linear(state_size, state_size*2), nn.ReLU(), \
+            nn.Linear(state_size*2, state_size*2), nn.ReLU(), \
+            nn.Linear(state_size*2, state_size*2), nn.ReLU(), \
+            nn.Linear(state_size*2, n_actions) ])
+        """
+        self.Net = nn.Sequential(*[nn.Linear(state_size, state_size*2), nn.ReLU(), \
+            nn.Linear(state_size*2, n_actions)])
+        self.Target = nn.Sequential(*[nn.Linear(state_size, state_size*2), nn.ReLU(), \
+            nn.Linear(state_size*2, n_actions)])
+        """
 
         #Initialize Loss & Optim
-        self.optim = torch.optim.Adam(self.Net.parameters(), lr=2e-3)
+        self.optim = torch.optim.Adam(self.Net.parameters(), lr=3e-6)
         self.loss  = torch.nn.MSELoss()
 
         #Set up memory buff and step_count
@@ -22,7 +35,11 @@ class DQN():
         #Save variables
         self.gamma = discount
         self.n_actions = n_actions 
-        self.device = torch.device('cuda')
+
+        if device==None:
+            self.device = torch.device('cpu')
+        else:
+            self.device = device
 
         #Move Networks to GPU
         self.Net    = self.Net.to(self.device)
@@ -80,9 +97,15 @@ class DQN():
             self.Target.load_state_dict(self.Net.state_dict())
 
 
-    def GenernateAction(self, state:torch.Tensor) -> int:
-        self.Net.eval()
+    def generate_action(self, state:torch.Tensor, legal_actions : torch.Tensor) -> int:
+        mask = torch.zeros(self.n_actions)
+        legal_actions = legal_actions.to(torch.long)
+        mask[legal_actions] = 1
+        #self.Net.eval()
         state = state.to(self.device)
-        a = int(torch.argmax(self.Net(state), dim=0).item())
+        vals = self.Target(state)
+        negated_mask = torch.abs(1-mask)
+        vals = negated_mask*(vals*0 - 100) + mask*vals
+        a = int(torch.argmax(vals, dim=0).item())
         return a
         
